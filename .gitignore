@@ -6,6 +6,10 @@ __pycache__/
 # C extensions
 *.so
 
+README.MD
+
+tgbot/media/*
+
 # Distribution / packaging
 .Python
 build/
