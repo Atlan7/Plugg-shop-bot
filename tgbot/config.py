@@ -1,6 +1,8 @@
 from dataclasses import dataclass
 from typing import Optional
 
+from sqlalchemy.ext.asyncio import create_async_engine, async_sessionmaker
+
 from environs import Env
 
 
@@ -30,27 +32,28 @@ class DbConfig:
     database: str
     port: int = 5432
 
-    # For SQLAlchemy
-    def construct_sqlalchemy_url(self, driver="asyncpg", host=None, port=None) -> str:
+
+    def construct_postgresql_url(self, driver="asyncpg", host=None, port=None) -> str:
         """
-        Constructs and returns a SQLAlchemy URL for this database configuration.
+        Constructs and returns a URL for postgresql database configuration.
         """
-        # TODO: If you're using SQLAlchemy, move the import to the top of the file!
-        from sqlalchemy.engine.url import URL
 
         if not host:
             host = self.host
         if not port:
             port = self.port
-        uri = URL.create(
-            drivername=f"postgresql+{driver}",
-            username=self.user,
-            password=self.password,
-            host=host,
-            port=port,
-            database=self.database,
-        )
-        return uri.render_as_string(hide_password=False)
+        uri = f'postgresql+{driver}://{self.user}:{self.password}@{host}:{port}/{self.database}'        
+        return uri
+
+
+    #TODO: Think over architecture
+    def create_connection(self):
+        """
+        Creates connection with database.
+        """
+        self.engine = create_async_engine(url=self.construct_postgresql_url(), echo=True)
+        self.session = async_sessionmaker(self.engine, expire_on_commit=False)
+
 
     @staticmethod
     def from_env(env: Env):
@@ -75,6 +78,7 @@ class TgBot:
 
     token: str
     admin_ids: list[int]
+    managers_usernames: list[str]
     use_redis: bool
 
     @staticmethod
@@ -84,8 +88,11 @@ class TgBot:
         """
         token = env.str("BOT_TOKEN")
         admin_ids = list(map(int, env.list("ADMINS")))
+        managers_usernames = list(map(str, env.list("MANAGERS_USERNAMES")))
         use_redis = env.bool("USE_REDIS")
-        return TgBot(token=token, admin_ids=admin_ids, use_redis=use_redis)
+        return TgBot(
+            token=token, admin_ids=admin_ids, managers_usernames=managers_usernames, use_redis=use_redis
+        )
 
 
 @dataclass
@@ -131,6 +138,24 @@ class RedisConfig:
 
 
 @dataclass
+class MediaConfig:
+    """
+    Media configuration class.
+
+    This class holds settings for base media path dir.
+    """
+    base_path: str
+
+    @staticmethod
+    def from_env(env: Env):
+        """
+        Creates the MediaConfig object from environment variables.
+        """
+        base_path = env.str("MEDIA_ROOT")
+        return MediaConfig(base_path=base_path)
+
+
+@dataclass
 class Miscellaneous:
     """
     Miscellaneous configuration class.
@@ -167,7 +192,8 @@ class Config:
     """
 
     tg_bot: TgBot
-    misc: Miscellaneous
+    misc: Optional[Miscellaneous] = None
+    media: Optional[MediaConfig] = None
     db: Optional[DbConfig] = None
     redis: Optional[RedisConfig] = None
 
@@ -187,7 +213,12 @@ def load_config(path: str = None) -> Config:
 
     return Config(
         tg_bot=TgBot.from_env(env),
-        # db=DbConfig.from_env(env),
+        db=DbConfig.from_env(env),
+        media=MediaConfig.from_env(env),
         # redis=RedisConfig.from_env(env),
-        misc=Miscellaneous(),
+        # misc=Miscellaneous(),
     )
+
+#TODO: think over architecture
+preloaded_config = load_config(".env")
+preloaded_config.db.create_connection()

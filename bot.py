@@ -1,19 +1,22 @@
 import asyncio
 import logging
-
 import betterlogging as bl
-from aiogram import Bot, Dispatcher
+
+from aiogram import Bot, Dispatcher, types
 from aiogram.fsm.storage.memory import MemoryStorage
 from aiogram.fsm.storage.redis import RedisStorage, DefaultKeyBuilder
 
-from tgbot.config import load_config, Config
-from tgbot.handlers import routers_list
 from tgbot.middlewares.config import ConfigMiddleware
-from tgbot.services import broadcaster
+from tgbot.middlewares.database import DatabaseMiddleware
 
+from tgbot.handlers import routers_list
+from tgbot.services import broadcaster, set_default_bot_commands
+
+from tgbot.config import preloaded_config, Config
 
 async def on_startup(bot: Bot, admin_ids: list[int]):
-    await broadcaster.broadcast(bot, admin_ids, "Бот був запущений")
+    await broadcaster.broadcast(bot, admin_ids, "Бот запущен!")
+    await set_default_bot_commands.set_default_commands(bot)
 
 
 def register_global_middlewares(dp: Dispatcher, config: Config, session_pool=None):
@@ -29,7 +32,7 @@ def register_global_middlewares(dp: Dispatcher, config: Config, session_pool=Non
     """
     middleware_types = [
         ConfigMiddleware(config),
-        # DatabaseMiddleware(session_pool),
+        DatabaseMiddleware(session_pool),
     ]
 
     for middleware_type in middleware_types:
@@ -63,7 +66,7 @@ def setup_logging():
     logger.info("Starting bot")
 
 
-def get_storage(config):
+def get_storage(config: Config):
     """
     Return storage based on the provided configuration.
 
@@ -86,17 +89,16 @@ def get_storage(config):
 async def main():
     setup_logging()
 
-    config = load_config(".env")
-    storage = get_storage(config)
+    storage = get_storage(preloaded_config)
 
-    bot = Bot(token=config.tg_bot.token, parse_mode="HTML")
+    bot = Bot(token=preloaded_config.tg_bot.token, parse_mode="HTML")
     dp = Dispatcher(storage=storage)
 
     dp.include_routers(*routers_list)
 
-    register_global_middlewares(dp, config)
+    register_global_middlewares(dp, preloaded_config, session_pool=preloaded_config.db.session)
 
-    await on_startup(bot, config.tg_bot.admin_ids)
+    await on_startup(bot, preloaded_config.tg_bot.admin_ids)
     await dp.start_polling(bot)
 
 
@@ -104,4 +106,4 @@ if __name__ == "__main__":
     try:
         asyncio.run(main())
     except (KeyboardInterrupt, SystemExit):
-        logging.error("Бот був вимкнений!")
+        logging.error("Бот был выключен!")
